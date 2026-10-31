@@ -1,0 +1,10 @@
+rootProject.name = 'video-tiktok-generate'
+
+include 'core'
+include '01-script'
+include '02-audio'
+include '03-subtitle'
+include '04-visual'
+include '05-render'
+include '06-media'
+include 'app'

@@ -1,0 +1,21 @@
+server:
+  port: ${SERVER_PORT:38100}
+
+spring:
+  application:
+    name: pipeline-orchestrator
+
+tiktok:
+  pipeline:
+    script-url: ${SCRIPT_SERVICE_URL:http://localhost:38101}
+    audio-url: ${AUDIO_SERVICE_URL:http://localhost:38102}
+    subtitle-url: ${SUBTITLE_SERVICE_URL:http://localhost:38103}
+    visual-url: ${VISUAL_SERVICE_URL:http://localhost:38104}
+    render-url: ${RENDER_SERVICE_URL:http://localhost:38105}
+    output-dir: ${PIPELINE_OUTPUT_DIR:/tmp/tiktok-pipeline}
+    run-on-startup: ${RUN_ON_STARTUP:false}
+    transcript-path: ${TRANSCRIPT_PATH:/home/pqviet7/viet-area/pqviet7/code-workspace/vietpq/personal-tool/video-tiktok-generate/script.txt}
+
+logging:
+  level:
+    com.tiktok.video.app: INFO

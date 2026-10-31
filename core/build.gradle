@@ -1,0 +1,14 @@
+dependencies {
+    // Jackson JSON serialization & deserialization for core domain models & DTOs
+    api 'com.fasterxml.jackson.core:jackson-databind'
+    api 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+    api 'com.fasterxml.jackson.core:jackson-annotations'
+
+    // SLF4J logging facade
+    api 'org.slf4j:slf4j-api'
+
+    // Testing framework
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.assertj:assertj-core'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}

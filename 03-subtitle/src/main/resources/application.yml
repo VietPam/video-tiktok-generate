@@ -1,0 +1,16 @@
+server:
+  port: ${SERVER_PORT:38103}
+
+spring:
+  application:
+    name: subtitle-service
+
+tiktok:
+  subtitle:
+    output-dir: ${SUBTITLE_OUTPUT_DIR:/tmp/tiktok-subtitles}
+    font-name: ${SUBTITLE_FONT:Arial}
+    font-size: ${SUBTITLE_FONT_SIZE:54}
+
+logging:
+  level:
+    com.tiktok.video.subtitle: INFO

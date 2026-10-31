@@ -1,0 +1,225 @@
+package com.tiktok.video.subtitle.generator;
+
+import com.tiktok.video.core.contract.SubtitleGenerator;
+import com.tiktok.video.core.exception.SubtitleGenerationException;
+import com.tiktok.video.core.model.AudioTimelineManifest;
+import com.tiktok.video.core.model.Scene;
+import com.tiktok.video.core.model.SceneAudioTimeline;
+import com.tiktok.video.core.model.TikTokScript;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
+
+/**
+ * Generates TikTok-styled Advanced SubStation Alpha (.ass) subtitles with fixed karaoke subtitle card (74-85%),
+ * displaying karaoke-highlighted spoken English on line 1 and Vietnamese translation on line 2.
+ */
+public class AssSubtitleGenerator implements SubtitleGenerator {
+
+    private static final Logger log = LoggerFactory.getLogger(AssSubtitleGenerator.class);
+
+    private final String fontName;
+    private final int fontSize;
+
+    public AssSubtitleGenerator() {
+        this("Arial", 44);
+    }
+
+    public AssSubtitleGenerator(String fontName, int fontSize) {
+        this.fontName = (fontName == null || fontName.isBlank()) ? "Arial" : fontName.trim();
+        this.fontSize = (fontSize <= 0) ? 44 : fontSize;
+    }
+
+    @Override
+    public Path generateAss(TikTokScript script, AudioTimelineManifest timeline, Path outputDir)
+            throws SubtitleGenerationException {
+        if (script == null) throw new IllegalArgumentException("script cannot be null");
+        if (timeline == null) throw new IllegalArgumentException("timeline cannot be null");
+        if (outputDir == null) throw new IllegalArgumentException("outputDir cannot be null");
+
+        try {
+            Files.createDirectories(outputDir);
+        } catch (IOException e) {
+            throw new SubtitleGenerationException("Failed to create output directory: " + outputDir, e);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        appendScriptInfo(sb);
+        appendStyles(sb);
+        appendEventsHeader(sb);
+
+        // Continuous persistent Navy card background across the entire video duration (74-85% = Y 1420..1632)
+        double totalDuration = timeline.totalDurationSeconds();
+        String totalStart = formatAssTime(0.0);
+        String totalEnd = formatAssTime(totalDuration);
+        sb.append(String.format("Dialogue: 0,%s,%s,CardBg,,0,0,0,,{\\p1}m 97 1420 l 983 1420 b 1001 1420 1015 1434 1015 1452 l 1015 1600 b 1015 1618 1001 1632 983 1632 l 97 1632 b 79 1632 65 1618 65 1600 l 65 1452 b 65 1434 79 1420 97 1420{\\p0}\n",
+                totalStart, totalEnd));
+
+        // Subtitle chunks per scene
+        for (Scene scene : script.scenes()) {
+            Optional<SceneAudioTimeline> optTimeline = timeline.getTimeline(scene.id());
+            if (optTimeline.isEmpty()) {
+                log.warn("No audio timeline entry for scene {}, skipping subtitle", scene.id());
+                continue;
+            }
+
+            SceneAudioTimeline sat = optTimeline.get();
+            double sceneStart = sat.startSeconds();
+            double sceneEnd = sat.endSeconds();
+
+            if (sceneEnd <= sceneStart) {
+                continue;
+            }
+
+            // Split into manageable chunks (max 7-8 words per line)
+            List<SubtitleChunk> chunks = splitSceneIntoChunks(scene, sceneStart, sceneEnd);
+            for (SubtitleChunk chunk : chunks) {
+                String fStart = formatAssTime(chunk.startSec);
+                String fEnd = formatAssTime(chunk.endSec);
+
+                // English Karaoke line: \fad(150,150) for smooth fade transition
+                sb.append(String.format("Dialogue: 1,%s,%s,SubEng,,0,0,0,,{\\fad(150,150)}%s\n",
+                        fStart, fEnd, chunk.karaokeEnglish));
+
+                // Vietnamese translation line: \fad(150,150)
+                if (chunk.vietnameseText != null && !chunk.vietnameseText.isBlank()) {
+                    sb.append(String.format("Dialogue: 1,%s,%s,SubVie,,0,0,0,,{\\fad(150,150)}%s\n",
+                            fStart, fEnd, chunk.vietnameseText));
+                }
+            }
+        }
+
+        String fileName = "subtitles_" + System.currentTimeMillis() + ".ass";
+        Path assPath = outputDir.resolve(fileName);
+
+        try {
+            Files.writeString(assPath, sb.toString(), StandardCharsets.UTF_8);
+            log.info("Generated ASS karaoke subtitle file at: {}", assPath.toAbsolutePath());
+            return assPath.toAbsolutePath();
+        } catch (IOException e) {
+            throw new SubtitleGenerationException("Failed to write ASS file to " + assPath, e);
+        }
+    }
+
+    private void appendScriptInfo(StringBuilder sb) {
+        sb.append("[Script Info]\n")
+          .append("; Script generated by TikTok Video Automation Karaoke Engine\n")
+          .append("Title: TikTok IELTS Vocabulary Lesson Karaoke\n")
+          .append("ScriptType: v4.00+\n")
+          .append("WrapStyle: 2\n")
+          .append("ScaledBorderAndShadow: yes\n")
+          .append("YCbCr Matrix: None\n")
+          .append("PlayResX: 1080\n")
+          .append("PlayResY: 1920\n\n");
+    }
+
+    private void appendStyles(StringBuilder sb) {
+        sb.append("[V4+ Styles]\n")
+          .append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
+          // Style CardBg: dark navy background box (&H00352216 in BGR = #162235)
+          .append("Style: CardBg,").append(fontName).append(",10,&H00352216,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1\n")
+          // Style SubEng: Alignment 2 (bottom center), MarginV 440, Bold, White Primary, 50% opacity Secondary (&H80FFFFFF), no outline
+          .append("Style: SubEng,").append(fontName).append(",").append(fontSize).append(",&H00FFFFFF,&H80FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,2,80,80,440,1\n")
+          // Style SubVie: Alignment 2 (bottom center), MarginV 355, Fontsize 34, Regular, Pale greyish-blue (&H00D0D8E0), no outline
+          .append("Style: SubVie,").append(fontName).append(",34,&H00D0D8E0,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,2,80,80,355,1\n\n");
+    }
+
+    private void appendEventsHeader(StringBuilder sb) {
+        sb.append("[Events]\n")
+          .append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
+    }
+
+    record SubtitleChunk(double startSec, double endSec, String karaokeEnglish, String vietnameseText) {}
+
+    private List<SubtitleChunk> splitSceneIntoChunks(Scene scene, double startSec, double endSec) {
+        String spoken = scene.spokenText().replaceAll("\\r?\\n", " ").trim();
+        String subtitleVi = scene.onScreenSubtitle() != null ? scene.onScreenSubtitle().replaceAll("\\r?\\n", " ").trim() : "";
+
+        String[] words = spoken.split("\\s+");
+        if (words.length <= 8) {
+            String karaoke = buildKaraokeString(words, endSec - startSec);
+            return List.of(new SubtitleChunk(startSec, endSec, karaoke, subtitleVi));
+        }
+
+        // Split words into 2 chunks
+        int mid = (words.length + 1) / 2;
+        String[] w1 = new String[mid];
+        String[] w2 = new String[words.length - mid];
+        System.arraycopy(words, 0, w1, 0, mid);
+        System.arraycopy(words, mid, w2, 0, words.length - mid);
+
+        double totalDur = endSec - startSec;
+        double dur1 = totalDur * ((double) w1.length / words.length);
+        double splitTime = startSec + dur1;
+
+        // Split Vietnamese subtitle if it has period, comma, or dash
+        String vi1 = subtitleVi;
+        String vi2 = subtitleVi;
+        if (subtitleVi.contains(". ")) {
+            String[] vParts = subtitleVi.split("\\.\\s+", 2);
+            vi1 = vParts[0];
+            vi2 = vParts.length > 1 ? vParts[1] : "";
+        } else if (subtitleVi.contains(", ")) {
+            String[] vParts = subtitleVi.split(",\\s+", 2);
+            vi1 = vParts[0];
+            vi2 = vParts.length > 1 ? vParts[1] : "";
+        }
+
+        String k1 = buildKaraokeString(w1, dur1);
+        String k2 = buildKaraokeString(w2, totalDur - dur1);
+
+        List<SubtitleChunk> res = new ArrayList<>();
+        res.add(new SubtitleChunk(startSec, splitTime, k1, vi1));
+        res.add(new SubtitleChunk(splitTime, endSec, k2, vi2));
+        return res;
+    }
+
+    private String buildKaraokeString(String[] words, double durationSeconds) {
+        int totalCentis = (int) Math.round(durationSeconds * 100);
+        if (words.length == 0) return "";
+
+        int[] lengths = new int[words.length];
+        int sumLen = 0;
+        for (int i = 0; i < words.length; i++) {
+            lengths[i] = Math.max(words[i].length(), 2);
+            sumLen += lengths[i];
+        }
+
+        int[] centis = new int[words.length];
+        int allocated = 0;
+        for (int i = 0; i < words.length; i++) {
+            centis[i] = Math.max((int) Math.round(((double) lengths[i] / sumLen) * totalCentis), 5);
+            allocated += centis[i];
+        }
+        centis[words.length - 1] += (totalCentis - allocated);
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < words.length; i++) {
+            sb.append("{\\kf").append(centis[i]).append("}").append(words[i]);
+            if (i < words.length - 1) {
+                sb.append(" ");
+            }
+        }
+        return sb.toString();
+    }
+
+    static String formatAssTime(double seconds) {
+        long totalCentis = Math.round(seconds * 100);
+        long hours = totalCentis / (3600 * 100);
+        long remainder = totalCentis % (3600 * 100);
+        long minutes = remainder / (60 * 100);
+        remainder = remainder % (60 * 100);
+        long secs = remainder / 100;
+        long centis = remainder % 100;
+
+        return String.format(Locale.ROOT, "%d:%02d:%02d.%02d", hours, minutes, secs, centis);
+    }
+}

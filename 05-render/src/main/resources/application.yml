@@ -1,0 +1,15 @@
+server:
+  port: ${SERVER_PORT:38105}
+
+spring:
+  application:
+    name: render-service
+
+tiktok:
+  render:
+    ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
+    output-dir: ${RENDER_OUTPUT_DIR:/tmp/tiktok-renders}
+
+logging:
+  level:
+    com.tiktok.video.render: INFO

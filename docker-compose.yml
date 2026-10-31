@@ -1,0 +1,169 @@
+services:
+  script-service:
+    build:
+      context: ./01-script
+      dockerfile: Dockerfile
+    container_name: tiktok-script-service
+    ports:
+      - "${SCRIPT_PORT:-38101}:38101"
+    environment:
+      - SERVER_PORT=38101
+      - LLM_ENABLED=${LLM_ENABLED:-false}
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://host.docker.internal:11434}
+    volumes:
+      - shared_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:38101/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  audio-service:
+    build:
+      context: ./02-audio
+      dockerfile: Dockerfile
+    container_name: tiktok-audio-service
+    ports:
+      - "${AUDIO_PORT:-38102}:38102"
+    environment:
+      - SERVER_PORT=38102
+      - TTS_BASE_URL=${TTS_BASE_URL:-http://host.docker.internal:8000}
+      - TTS_MODE=${TTS_MODE:-auto}
+      - AUDIO_OUTPUT_DIR=/data/audio
+    volumes:
+      - shared_data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:38102/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  subtitle-service:
+    build:
+      context: ./03-subtitle
+      dockerfile: Dockerfile
+    container_name: tiktok-subtitle-service
+    ports:
+      - "${SUBTITLE_PORT:-38103}:38103"
+    environment:
+      - SERVER_PORT=38103
+      - SUBTITLE_OUTPUT_DIR=/data/subtitles
+    volumes:
+      - shared_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:38103/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  visual-service:
+    build:
+      context: ./04-visual
+      dockerfile: Dockerfile
+    container_name: tiktok-visual-service
+    ports:
+      - "${VISUAL_PORT:-38104}:38104"
+    environment:
+      - SERVER_PORT=38104
+      - VISUAL_OUTPUT_DIR=/data/cards
+    volumes:
+      - shared_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:38104/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  render-service:
+    build:
+      context: ./05-render
+      dockerfile: Dockerfile
+    container_name: tiktok-render-service
+    ports:
+      - "${RENDER_PORT:-38105}:38105"
+    environment:
+      - SERVER_PORT=38105
+      - RENDER_OUTPUT_DIR=/data/renders
+    volumes:
+      - shared_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:38105/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  media-service:
+    build:
+      context: ./06-media
+      dockerfile: Dockerfile
+    container_name: tiktok-media-service
+    ports:
+      - "${MEDIA_PORT:-38106}:38106"
+    environment:
+      - SERVER_PORT=38106
+    volumes:
+      - shared_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:38106/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  app-orchestrator:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: tiktok-app-orchestrator
+    ports:
+      - "${APP_PORT:-38100}:38100"
+    environment:
+      - SERVER_PORT=38100
+      - SCRIPT_SERVICE_URL=http://script-service:38101
+      - AUDIO_SERVICE_URL=http://audio-service:38102
+      - SUBTITLE_SERVICE_URL=http://subtitle-service:38103
+      - VISUAL_SERVICE_URL=http://visual-service:38104
+      - RENDER_SERVICE_URL=http://render-service:38105
+      - MEDIA_SERVICE_URL=http://media-service:38106
+      - PIPELINE_OUTPUT_DIR=/data/output
+    volumes:
+      - shared_data:/data
+    depends_on:
+      script-service:
+        condition: service_healthy
+      audio-service:
+        condition: service_healthy
+      subtitle-service:
+        condition: service_healthy
+      visual-service:
+        condition: service_healthy
+      render-service:
+        condition: service_healthy
+      media-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:38100/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  shared_data:
+    name: tiktok-shared-data

@@ -1,0 +1,14 @@
+server:
+  port: ${SERVER_PORT:38104}
+
+spring:
+  application:
+    name: visual-service
+
+tiktok:
+  visual:
+    output-dir: ${VISUAL_OUTPUT_DIR:/tmp/tiktok-cards}
+
+logging:
+  level:
+    com.tiktok.video.visual: INFO

@@ -1,0 +1,20 @@
+tiktok:
+  video:
+    input-script: tests/fixtures/transcripts/standard_family_script.txt
+    output-dir: build/test-output/e2e-standard
+    tts:
+      endpoint: http://localhost:8000/v1/audio/speech
+      model: vieneu-v3-turbo
+      voice: Hải Đăng
+      sample-rate: 48000
+      inter-scene-pause-ms: 250
+    render:
+      width: 1080
+      height: 1920
+      fps: 30
+      ffmpeg-binary: /home/pqviet7/.local/bin/ffmpeg
+      enable-bgm: true
+      bgm-volume: 0.15
+      voice-volume: 1.0
+      font-family: DejaVu Sans
+      font-size: 72

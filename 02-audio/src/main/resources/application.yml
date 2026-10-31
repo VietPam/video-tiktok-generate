@@ -1,0 +1,17 @@
+server:
+  port: ${SERVER_PORT:38102}
+
+spring:
+  application:
+    name: audio-service
+
+tiktok:
+  tts:
+    base-url: ${TTS_BASE_URL:http://localhost:8000}
+    mode: ${TTS_MODE:auto}
+  audio:
+    output-dir: ${AUDIO_OUTPUT_DIR:/tmp/audio}
+
+logging:
+  level:
+    com.tiktok.video.audio: INFO

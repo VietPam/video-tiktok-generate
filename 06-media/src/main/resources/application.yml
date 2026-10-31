@@ -1,0 +1,14 @@
+server:
+  port: ${SERVER_PORT:38106}
+
+spring:
+  application:
+    name: media-service
+
+tiktok:
+  media:
+    assets-dir: ${MEDIA_ASSETS_DIR:/app/assets/images}
+
+logging:
+  level:
+    com.tiktok.video.media: INFO

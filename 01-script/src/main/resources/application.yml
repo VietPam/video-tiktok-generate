@@ -1,0 +1,16 @@
+server:
+  port: ${SERVER_PORT:38101}
+
+spring:
+  application:
+    name: script-service
+
+tiktok:
+  llm:
+    enabled: ${LLM_ENABLED:false}
+    base-url: ${LLM_BASE_URL:http://localhost:11434}
+    model: ${LLM_MODEL:llama3}
+
+logging:
+  level:
+    com.tiktok.video.script: INFO

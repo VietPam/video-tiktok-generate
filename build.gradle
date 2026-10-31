@@ -1,0 +1,41 @@
+plugins {
+    id 'org.springframework.boot' version '3.3.4' apply false
+}
+
+allprojects {
+    group = 'com.tiktok.video'
+    version = '1.0.0-SNAPSHOT'
+
+    repositories {
+        mavenCentral()
+    }
+}
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'java-library'
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    dependencies {
+        // Enforce aligned dependency versions across all subprojects via Spring Boot BOM
+        api platform('org.springframework.boot:spring-boot-dependencies:3.3.4')
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.release = 21
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        testLogging {
+            events 'passed', 'skipped', 'failed'
+            showStandardStreams = false
+        }
+    }
+}

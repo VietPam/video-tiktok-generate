@@ -1,0 +1,19 @@
+tiktok:
+  video:
+    input-script: tests/fixtures/transcripts/single_word_script.txt
+    output-dir: build/test-output/e2e-offline
+    tts:
+      offline-mock: true
+      endpoint: http://localhost:8000/v1/audio/speech
+      model: mock
+      voice: Synthetic
+      sample-rate: 48000
+      inter-scene-pause-ms: 250
+    render:
+      width: 1080
+      height: 1920
+      fps: 30
+      ffmpeg-binary: /home/pqviet7/.local/bin/ffmpeg
+      enable-bgm: false
+      font-family: DejaVu Sans
+      font-size: 72

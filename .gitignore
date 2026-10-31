@@ -1,0 +1,13 @@
+.gradle/
+build/
+out/
+!gradle/wrapper/gradle-wrapper.jar
+*.log
+output/
+*.mp4
+*.orig
+preview_*.jpg
+test_*_frame.jpg
+tests/**/__pycache__/
+*.pyc
+
