@@ -26,7 +26,7 @@ public record TikTokScript(
     @JsonIgnore
     public List<Scene> vocabularyScenes() {
         return scenes.stream()
-            .filter(Scene::isVocabulary)
+            .filter(s -> s.sceneType() == SceneType.VOCABULARY)
             .toList();
     }
 

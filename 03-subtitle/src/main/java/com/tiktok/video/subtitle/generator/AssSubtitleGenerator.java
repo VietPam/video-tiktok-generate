@@ -19,12 +19,13 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Generates TikTok-styled Advanced SubStation Alpha (.ass) subtitles with fixed karaoke subtitle card (74-85%),
- * displaying karaoke-highlighted spoken English on line 1 and Vietnamese translation on line 2.
+ * Generates TikTok-styled Advanced SubStation Alpha (.ass) subtitles with a persistent karaoke subtitle card.
  */
 public class AssSubtitleGenerator implements SubtitleGenerator {
 
     private static final Logger log = LoggerFactory.getLogger(AssSubtitleGenerator.class);
+
+    private static final int MAX_WORDS_PER_CHUNK = 8;
 
     private final String fontName;
     private final int fontSize;
@@ -56,14 +57,11 @@ public class AssSubtitleGenerator implements SubtitleGenerator {
         appendStyles(sb);
         appendEventsHeader(sb);
 
-        // Continuous persistent Navy card background across the entire video duration (74-85% = Y 1420..1632)
         double totalDuration = timeline.totalDurationSeconds();
-        String totalStart = formatAssTime(0.0);
-        String totalEnd = formatAssTime(totalDuration);
-        sb.append(String.format("Dialogue: 0,%s,%s,CardBg,,0,0,0,,{\\p1}m 97 1420 l 983 1420 b 1001 1420 1015 1434 1015 1452 l 1015 1600 b 1015 1618 1001 1632 983 1632 l 97 1632 b 79 1632 65 1618 65 1600 l 65 1452 b 65 1434 79 1420 97 1420{\\p0}\n",
-                totalStart, totalEnd));
+        sb.append(String.format(Locale.ROOT,
+                "Dialogue: 0,%s,%s,CardBg,,0,0,0,,{\\p1}m 65 1420 l 1015 1420 b 1033 1420 1047 1434 1047 1452 l 1047 1600 b 1047 1618 1033 1632 1015 1632 l 65 1632 b 47 1632 33 1618 33 1600 l 33 1452 b 33 1434 47 1420 65 1420{\\p0}\n",
+                formatAssTime(0.0), formatAssTime(totalDuration)));
 
-        // Subtitle chunks per scene
         for (Scene scene : script.scenes()) {
             Optional<SceneAudioTimeline> optTimeline = timeline.getTimeline(scene.id());
             if (optTimeline.isEmpty()) {
@@ -72,27 +70,29 @@ public class AssSubtitleGenerator implements SubtitleGenerator {
             }
 
             SceneAudioTimeline sat = optTimeline.get();
-            double sceneStart = sat.startSeconds();
-            double sceneEnd = sat.endSeconds();
-
-            if (sceneEnd <= sceneStart) {
+            if (sat.endSeconds() <= sat.startSeconds()) {
                 continue;
             }
 
-            // Split into manageable chunks (max 7-8 words per line)
-            List<SubtitleChunk> chunks = splitSceneIntoChunks(scene, sceneStart, sceneEnd);
+            List<SubtitleChunk> chunks = splitSceneIntoChunks(scene, sat.startSeconds(), sat.endSeconds());
             for (SubtitleChunk chunk : chunks) {
-                String fStart = formatAssTime(chunk.startSec);
-                String fEnd = formatAssTime(chunk.endSec);
+                String viLine = truncateToOneLine(chunk.vietnameseText(), 70);
+                if (!viLine.isBlank()) {
+                    sb.append(String.format(Locale.ROOT,
+                            "Dialogue: 1,%s,%s,SubVie,,0,0,0,,{\\fad(150,150)}%s\n",
+                            formatAssTime(chunk.startSec()),
+                            formatAssTime(chunk.endSec()),
+                            escapeAssText(viLine)));
+                }
 
-                // English Karaoke line: \fad(150,150) for smooth fade transition
-                sb.append(String.format("Dialogue: 1,%s,%s,SubEng,,0,0,0,,{\\fad(150,150)}%s\n",
-                        fStart, fEnd, chunk.karaokeEnglish));
-
-                // Vietnamese translation line: \fad(150,150)
-                if (chunk.vietnameseText != null && !chunk.vietnameseText.isBlank()) {
-                    sb.append(String.format("Dialogue: 1,%s,%s,SubVie,,0,0,0,,{\\fad(150,150)}%s\n",
-                            fStart, fEnd, chunk.vietnameseText));
+                for (int wordIdx = 0; wordIdx < chunk.words().size(); wordIdx++) {
+                    WordTiming wt = chunk.words().get(wordIdx);
+                    String coloredLine = buildStateColoredEnglishLine(chunk.words(), wordIdx);
+                    sb.append(String.format(Locale.ROOT,
+                            "Dialogue: 2,%s,%s,SubEng,,0,0,0,,%s\n",
+                            formatAssTime(wt.startSec()),
+                            formatAssTime(wt.endSec()),
+                            coloredLine));
                 }
             }
         }
@@ -124,12 +124,9 @@ public class AssSubtitleGenerator implements SubtitleGenerator {
     private void appendStyles(StringBuilder sb) {
         sb.append("[V4+ Styles]\n")
           .append("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n")
-          // Style CardBg: dark navy background box (&H00352216 in BGR = #162235)
           .append("Style: CardBg,").append(fontName).append(",10,&H00352216,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1\n")
-          // Style SubEng: Alignment 2 (bottom center), MarginV 440, Bold, White Primary, 50% opacity Secondary (&H80FFFFFF), no outline
-          .append("Style: SubEng,").append(fontName).append(",").append(fontSize).append(",&H00FFFFFF,&H80FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,2,80,80,440,1\n")
-          // Style SubVie: Alignment 2 (bottom center), MarginV 355, Fontsize 34, Regular, Pale greyish-blue (&H00D0D8E0), no outline
-          .append("Style: SubVie,").append(fontName).append(",34,&H00D0D8E0,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,2,80,80,355,1\n\n");
+          .append("Style: SubEng,").append(fontName).append(",54,&H00FFFFFF,&H00FFD84A,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,2,70,70,397,1\n")
+          .append("Style: SubVie,").append(fontName).append(",36,&H00D0D8E0,&H00000000,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,2,70,70,330,1\n\n");
     }
 
     private void appendEventsHeader(StringBuilder sb) {
@@ -137,78 +134,141 @@ public class AssSubtitleGenerator implements SubtitleGenerator {
           .append("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
     }
 
-    record SubtitleChunk(double startSec, double endSec, String karaokeEnglish, String vietnameseText) {}
+    record WordTiming(String word, double startSec, double endSec) {}
+    record SubtitleChunk(double startSec, double endSec, List<WordTiming> words, String vietnameseText) {}
 
     private List<SubtitleChunk> splitSceneIntoChunks(Scene scene, double startSec, double endSec) {
-        String spoken = scene.spokenText().replaceAll("\\r?\\n", " ").trim();
-        String subtitleVi = scene.onScreenSubtitle() != null ? scene.onScreenSubtitle().replaceAll("\\r?\\n", " ").trim() : "";
+        String spoken = normalizeText(scene.spokenText());
+        String subtitleVi = normalizeText(scene.onScreenSubtitle());
 
-        String[] words = spoken.split("\\s+");
-        if (words.length <= 8) {
-            String karaoke = buildKaraokeString(words, endSec - startSec);
-            return List.of(new SubtitleChunk(startSec, endSec, karaoke, subtitleVi));
+        String[] words = spoken.isBlank() ? new String[0] : spoken.split("\\s+");
+        if (words.length == 0) {
+            return List.of(new SubtitleChunk(startSec, endSec, List.of(), subtitleVi));
         }
 
-        // Split words into 2 chunks
-        int mid = (words.length + 1) / 2;
-        String[] w1 = new String[mid];
-        String[] w2 = new String[words.length - mid];
-        System.arraycopy(words, 0, w1, 0, mid);
-        System.arraycopy(words, mid, w2, 0, words.length - mid);
-
-        double totalDur = endSec - startSec;
-        double dur1 = totalDur * ((double) w1.length / words.length);
-        double splitTime = startSec + dur1;
-
-        // Split Vietnamese subtitle if it has period, comma, or dash
-        String vi1 = subtitleVi;
-        String vi2 = subtitleVi;
-        if (subtitleVi.contains(". ")) {
-            String[] vParts = subtitleVi.split("\\.\\s+", 2);
-            vi1 = vParts[0];
-            vi2 = vParts.length > 1 ? vParts[1] : "";
-        } else if (subtitleVi.contains(", ")) {
-            String[] vParts = subtitleVi.split(",\\s+", 2);
-            vi1 = vParts[0];
-            vi2 = vParts.length > 1 ? vParts[1] : "";
+        List<SubtitleChunk> result = new ArrayList<>();
+        List<String[]> chunks = new ArrayList<>();
+        for (int i = 0; i < words.length; i += MAX_WORDS_PER_CHUNK) {
+            int chunkEnd = Math.min(words.length, i + MAX_WORDS_PER_CHUNK);
+            String[] chunkWords = new String[chunkEnd - i];
+            System.arraycopy(words, i, chunkWords, 0, chunkEnd - i);
+            chunks.add(chunkWords);
         }
 
-        String k1 = buildKaraokeString(w1, dur1);
-        String k2 = buildKaraokeString(w2, totalDur - dur1);
-
-        List<SubtitleChunk> res = new ArrayList<>();
-        res.add(new SubtitleChunk(startSec, splitTime, k1, vi1));
-        res.add(new SubtitleChunk(splitTime, endSec, k2, vi2));
-        return res;
-    }
-
-    private String buildKaraokeString(String[] words, double durationSeconds) {
-        int totalCentis = (int) Math.round(durationSeconds * 100);
-        if (words.length == 0) return "";
-
-        int[] lengths = new int[words.length];
-        int sumLen = 0;
-        for (int i = 0; i < words.length; i++) {
-            lengths[i] = Math.max(words[i].length(), 2);
-            sumLen += lengths[i];
+        double totalDuration = endSec - startSec;
+        double[] chunkWeights = chunks.stream().mapToDouble(this::sumWordWeight).toArray();
+        double weightSum = 0.0;
+        for (double weight : chunkWeights) {
+            weightSum += weight;
         }
-
-        int[] centis = new int[words.length];
-        int allocated = 0;
-        for (int i = 0; i < words.length; i++) {
-            centis[i] = Math.max((int) Math.round(((double) lengths[i] / sumLen) * totalCentis), 5);
-            allocated += centis[i];
-        }
-        centis[words.length - 1] += (totalCentis - allocated);
-
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < words.length; i++) {
-            sb.append("{\\kf").append(centis[i]).append("}").append(words[i]);
-            if (i < words.length - 1) {
-                sb.append(" ");
+        if (weightSum <= 0.0) {
+            weightSum = chunks.size();
+            for (int i = 0; i < chunkWeights.length; i++) {
+                chunkWeights[i] = 1.0;
             }
         }
-        return sb.toString();
+
+        double currentStart = startSec;
+        for (int i = 0; i < chunks.size(); i++) {
+            String[] chunkWords = chunks.get(i);
+            double chunkDuration = (i == chunks.size() - 1)
+                    ? (endSec - currentStart)
+                    : totalDuration * (chunkWeights[i] / weightSum);
+
+            double chunkEnd = Math.max(currentStart + 0.12, currentStart + chunkDuration);
+            if (i == chunks.size() - 1 || chunkEnd > endSec) {
+                chunkEnd = endSec;
+            }
+
+            List<WordTiming> timings = buildWordTimings(chunkWords, currentStart, chunkEnd);
+            String viChunk = (chunks.size() == 1) ? subtitleVi : subtitleVi;
+            result.add(new SubtitleChunk(currentStart, chunkEnd, timings, viChunk));
+            currentStart = chunkEnd;
+        }
+
+        return result;
+    }
+
+    private List<WordTiming> buildWordTimings(String[] words, double chunkStart, double chunkEnd) {
+        List<WordTiming> timings = new ArrayList<>();
+        if (words.length == 0) {
+            return timings;
+        }
+
+        double chunkDuration = Math.max(0.12, chunkEnd - chunkStart);
+        double weightSum = sumWordWeight(words);
+        if (weightSum <= 0.0) {
+            weightSum = words.length;
+        }
+
+        double cursor = chunkStart;
+        for (int i = 0; i < words.length; i++) {
+            double ratio = Math.max(1.0, words[i].length()) / weightSum;
+            double dur = (i == words.length - 1) ? (chunkEnd - cursor) : chunkDuration * ratio;
+            double next = Math.max(cursor + 0.06, cursor + dur);
+            if (i == words.length - 1 || next > chunkEnd) {
+                next = chunkEnd;
+            }
+            timings.add(new WordTiming(words[i], cursor, next));
+            cursor = next;
+        }
+
+        return timings;
+    }
+
+    private double sumWordWeight(String[] words) {
+        double sum = 0.0;
+        for (String w : words) {
+            sum += Math.max(2, w.length());
+        }
+        return sum;
+    }
+
+    private String buildStateColoredEnglishLine(List<WordTiming> words, int currentIndex) {
+        StringBuilder line = new StringBuilder();
+        for (int i = 0; i < words.size(); i++) {
+            WordTiming wt = words.get(i);
+            String token = escapeAssText(wt.word());
+            if (i < currentIndex) {
+                line.append("{\\1c&HFFFFFF&\\1a&H00&}").append(token);
+            } else if (i == currentIndex) {
+                line.append("{\\1c&H4AD8FF&\\1a&H00&}").append(token);
+            } else {
+                line.append("{\\1c&HFFFFFF&\\1a&H80&}").append(token);
+            }
+            if (i < words.size() - 1) {
+                line.append(" ");
+            }
+        }
+        return line.toString();
+    }
+
+    private String truncateToOneLine(String value, int maxChars) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = normalizeText(value);
+        if (normalized.length() <= maxChars) {
+            return normalized;
+        }
+        return normalized.substring(0, Math.max(0, maxChars - 1)).trim() + "…";
+    }
+
+    private String normalizeText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text.replaceAll("\\r?\\n", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    private String escapeAssText(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        return text
+                .replace("\\", "\\\\")
+                .replace("{", "\\{")
+                .replace("}", "\\}");
     }
 
     static String formatAssTime(double seconds) {

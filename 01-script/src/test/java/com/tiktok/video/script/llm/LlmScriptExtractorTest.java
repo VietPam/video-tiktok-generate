@@ -45,7 +45,7 @@ class LlmScriptExtractorTest {
         TikTokScript script = extractor.extract("Sample transcript");
 
         assertThat(script.topic()).isEqualTo("Family");
-        assertThat(script.totalScenes()).isEqualTo(3); // Hook, 1 Word, CTA
+        assertThat(script.totalScenes()).isEqualTo(5); // Hook, 1 Word x3 scenes, CTA
         assertThat(script.vocabularyScenes().get(0).vocabularyItem().ipa()).isEqualTo("/ˈsɪb.lɪŋ/");
     }
 

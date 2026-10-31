@@ -300,7 +300,7 @@ public class EmpiricalAdversarialHarnessTest {
 
         assertThat(script.topic()).isEqualTo("Family");
         assertThat(script.targetBand()).isEqualTo("Band 7+");
-        assertThat(script.scenes()).hasSize(7);
+        assertThat(script.scenes()).hasSize(17);
 
         List<Scene> vocabScenes = script.vocabularyScenes();
         assertThat(vocabScenes).hasSize(5);

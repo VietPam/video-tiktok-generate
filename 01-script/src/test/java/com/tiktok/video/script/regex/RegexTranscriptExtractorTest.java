@@ -30,14 +30,14 @@ class RegexTranscriptExtractorTest {
     }
 
     @Test
-    @DisplayName("F5 & Scenario 1: Parse standard script.txt into 7 scenes (Hook, 5 Words, CTA)")
+    @DisplayName("F5 & Scenario 1: Parse standard script.txt into 17 scenes (Hook, 5 Words x3, CTA)")
     void testExtractStandardScriptTxt() throws IOException {
         String content = Files.readString(scriptTxtPath);
         TikTokScript script = extractor.extract(content);
 
         assertThat(script.topic()).isEqualTo("Family");
         assertThat(script.targetBand()).isEqualTo("Band 7+");
-        assertThat(script.totalScenes()).isEqualTo(7);
+        assertThat(script.totalScenes()).isEqualTo(17);
 
         // Hook Scene
         Scene hook = script.hookScene().orElseThrow();
@@ -70,7 +70,7 @@ class RegexTranscriptExtractorTest {
 
         // CTA Scene
         Scene cta = script.ctaScene().orElseThrow();
-        assertThat(cta.sequenceIndex()).isEqualTo(6);
+        assertThat(cta.sequenceIndex()).isEqualTo(16);
         assertThat(cta.sceneType()).isEqualTo(SceneType.CALL_TO_ACTION);
         assertThat(cta.spokenText()).contains("action step");
     }

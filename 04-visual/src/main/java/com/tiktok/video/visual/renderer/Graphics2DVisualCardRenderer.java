@@ -3,6 +3,7 @@ package com.tiktok.video.visual.renderer;
 import com.tiktok.video.core.contract.VisualCardRenderer;
 import com.tiktok.video.core.exception.VisualRenderException;
 import com.tiktok.video.core.model.Scene;
+import com.tiktok.video.core.model.SceneType;
 import com.tiktok.video.core.model.TikTokScript;
 import com.tiktok.video.core.model.VocabularyItem;
 import org.slf4j.Logger;
@@ -15,14 +16,14 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * Renders high-resolution transparent PNG visual cards (1080x1920) using Java2D Graphics2D
- * for vocabulary words, IPA phonetic notation, definitions, and collocations.
+ * Renders high-resolution transparent PNG visual cards (1080x1920) using Java2D Graphics2D.
  */
 public class Graphics2DVisualCardRenderer implements VisualCardRenderer {
 
@@ -42,17 +43,27 @@ public class Graphics2DVisualCardRenderer implements VisualCardRenderer {
             throw new VisualRenderException("Failed to create output directory: " + outputDir, e);
         }
 
-        Map<String, Path> cardMap = new HashMap<>();
-
+        Map<String, Integer> vocabOrder = new HashMap<>();
+        List<VocabularyItem> orderedVocabulary = new ArrayList<>();
         for (Scene scene : script.scenes()) {
-            BufferedImage cardImage = null;
-            if (scene.isVocabulary() && scene.vocabularyItem() != null) {
-                cardImage = createCardImage(script.topic(), scene.vocabularyItem());
-            } else if (scene.isHook()) {
-                cardImage = createHookCardImage(script.topic(), scene);
-            } else if (scene.isCallToAction()) {
-                cardImage = createCtaCardImage(script.topic(), scene);
+            if (scene.sceneType() == SceneType.VOCABULARY && scene.vocabularyItem() != null) {
+                String key = scene.vocabularyItem().word().toLowerCase(Locale.ROOT);
+                if (!vocabOrder.containsKey(key)) {
+                    vocabOrder.put(key, vocabOrder.size() + 1);
+                    orderedVocabulary.add(scene.vocabularyItem());
+                }
             }
+        }
+
+        Map<String, Path> cardMap = new HashMap<>();
+        for (Scene scene : script.scenes()) {
+            BufferedImage cardImage = switch (scene.sceneType()) {
+                case HOOK -> createHookCardImage(script.topic(), orderedVocabulary);
+                case VOCABULARY -> createCardImage(script.topic(), scene.vocabularyItem(), vocabOrder, false, false);
+                case VOCABULARY_COLLOCATION -> createCardImage(script.topic(), scene.vocabularyItem(), vocabOrder, true, false);
+                case VOCABULARY_EXAMPLE -> createCardImage(script.topic(), scene.vocabularyItem(), vocabOrder, false, true, scene.spokenText());
+                case CALL_TO_ACTION -> createCtaCardImage(script.topic(), scene);
+            };
 
             if (cardImage != null) {
                 String fileName = "card_" + scene.id() + ".png";
@@ -71,262 +82,137 @@ public class Graphics2DVisualCardRenderer implements VisualCardRenderer {
     }
 
     public BufferedImage createCardImage(String topic, VocabularyItem item) {
-        BufferedImage image = new BufferedImage(CANVAS_WIDTH, CANVAS_HEIGHT, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g2d = image.createGraphics();
-
-        try {
-            // High quality antialiasing
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-
-            // 1. TOP ILLUSTRATION IMAGE (Y: 150 to 750, 960x600)
-            int imgX = 60;
-            int imgY = 150;
-            int imgW = CANVAS_WIDTH - 120; // 960px
-            int imgH = 600;
-            int imgArc = 48;
-
-            // Load illustration image if exists
-            BufferedImage illustImg = loadIllustrationForWord(item.word());
-            if (illustImg != null) {
-                Shape oldClip = g2d.getClip();
-                g2d.setClip(new RoundRectangle2D.Double(imgX, imgY, imgW, imgH, imgArc, imgArc));
-                g2d.drawImage(illustImg, imgX, imgY, imgW, imgH, null);
-                g2d.setClip(oldClip);
-            } else {
-                // Fallback soft pastel gradient box
-                GradientPaint bgGrad = new GradientPaint(imgX, imgY, new Color(225, 238, 255), imgX, imgY + imgH, new Color(245, 250, 255));
-                g2d.setPaint(bgGrad);
-                g2d.fill(new RoundRectangle2D.Double(imgX, imgY, imgW, imgH, imgArc, imgArc));
-            }
-
-            // Image border with crisp pastel outline & shadow
-            g2d.setStroke(new BasicStroke(4.0f));
-            g2d.setColor(new Color(255, 255, 255, 220));
-            g2d.draw(new RoundRectangle2D.Double(imgX, imgY, imgW, imgH, imgArc, imgArc));
-
-            // Cute pastel badge on top left of illustration (auto-sized to text width, 20px padding)
-            String badgeText = "★ IELTS 7+ " + (topic != null ? topic.toUpperCase() : "FAMILY");
-            g2d.setFont(new Font("SansSerif", Font.BOLD, 26));
-            FontMetrics fmBadge = g2d.getFontMetrics();
-            int badgeTextW = fmBadge.stringWidth(badgeText);
-            int badgePadH = 20; // horizontal padding (each side)
-            int badgePadV = 10; // vertical padding (each side)
-            int badgeW = badgeTextW + (badgePadH * 2);
-            int badgeH = fmBadge.getHeight() + (badgePadV * 2);
-            int badgeX = imgX + 20;
-            int badgeY = imgY + 20;
-
-            g2d.setColor(new Color(255, 243, 205)); // Pastel light yellow
-            g2d.fill(new RoundRectangle2D.Double(badgeX, badgeY, badgeW, badgeH, 24, 24));
-            g2d.setColor(new Color(255, 180, 0));
-            g2d.setStroke(new BasicStroke(2.0f));
-            g2d.draw(new RoundRectangle2D.Double(badgeX, badgeY, badgeW, badgeH, 24, 24));
-
-            g2d.setColor(new Color(180, 100, 0));
-            int textX = badgeX + badgePadH;
-            int textY = badgeY + badgePadV + fmBadge.getAscent();
-            g2d.drawString(badgeText, textX, textY);
-
-            // 2. BOTTOM VOCABULARY CARD (Y: 780 to 1420, 960x640)
-            int cardX = 60;
-            int cardY = 780;
-            int cardW = CANVAS_WIDTH - 120; // 960px
-            int cardH = 640;
-            int cardArc = 48;
-
-            // Soft warm pastel shadow
-            g2d.setColor(new Color(60, 80, 120, 25));
-            g2d.fill(new RoundRectangle2D.Double(cardX + 2, cardY + 8, cardW, cardH, cardArc, cardArc));
-
-            // Pure clean card background with soft border
-            g2d.setColor(Color.WHITE);
-            g2d.fill(new RoundRectangle2D.Double(cardX, cardY, cardW, cardH, cardArc, cardArc));
-
-            // Card delicate border
-            g2d.setStroke(new BasicStroke(2.5f));
-            g2d.setColor(new Color(225, 233, 245));
-            g2d.draw(new RoundRectangle2D.Double(cardX, cardY, cardW, cardH, cardArc, cardArc));
-
-            // 2.1 Main Word
-            g2d.setColor(new Color(26, 39, 68));
-            g2d.setFont(new Font("SansSerif", Font.BOLD, 68));
-            FontMetrics fmWord = g2d.getFontMetrics();
-            String wordText = item.word();
-            int wordX = cardX + (cardW - fmWord.stringWidth(wordText)) / 2;
-            int wordY = cardY + 82;
-            g2d.drawString(wordText, wordX, wordY);
-
-            // 2.2 IPA & Part of Speech pill tag (Pastel Blue Pill)
-            String phoneticLine = item.ipa();
-            if (item.partOfSpeech() != null && !item.partOfSpeech().isBlank()) {
-                phoneticLine += "  •  " + item.partOfSpeech();
-            }
-            g2d.setFont(new Font("SansSerif", Font.BOLD, 30));
-            FontMetrics fmIpa = g2d.getFontMetrics();
-            int ipaTextW = fmIpa.stringWidth(phoneticLine);
-            int ipaPillW = ipaTextW + 48;
-            int ipaPillH = 44;
-            int ipaPillX = cardX + (cardW - ipaPillW) / 2;
-            int ipaPillY = wordY + 16;
-
-            g2d.setColor(new Color(235, 243, 255)); // Soft pastel blue background
-            g2d.fill(new RoundRectangle2D.Double(ipaPillX, ipaPillY, ipaPillW, ipaPillH, 22, 22));
-            g2d.setColor(new Color(20, 100, 240)); // Cute primary blue text
-            int ipaTextX = ipaPillX + (ipaPillW - ipaTextW) / 2;
-            int ipaTextY = ipaPillY + ((ipaPillH - fmIpa.getHeight()) / 2) + fmIpa.getAscent();
-            g2d.drawString(phoneticLine, ipaTextX, ipaTextY);
-
-            // 2.3 Delicate divider
-            int divY = ipaPillY + ipaPillH + 20;
-            g2d.setColor(new Color(240, 242, 248));
-            g2d.setStroke(new BasicStroke(2.0f));
-            g2d.drawLine(cardX + 45, divY, cardX + cardW - 45, divY);
-
-            // 2.4 English Definition line (gap 24px below divider)
-            g2d.setColor(new Color(65, 80, 105));
-            g2d.setFont(new Font("SansSerif", Font.PLAIN, 34));
-            FontMetrics fmDef = g2d.getFontMetrics();
-            String defText = item.definition();
-            int defStartY = divY + 36;
-            int defLinesDrawn = 1;
-            if (defText != null && !defText.isBlank()) {
-                defLinesDrawn = drawCenteredWrappedText(g2d, "Definition: " + defText, cardX + 40, defStartY, cardW - 80, 42);
-            }
-            int defEndY = defStartY + (defLinesDrawn * 42);
-
-            // 2.5 Collocation Highlight Box (symmetric padding, perfectly balanced gap)
-            if (item.collocation() != null && !item.collocation().isBlank()) {
-                int collocBoxY = defEndY + 20;
-                int collocBoxW = cardW - 80;
-                int collocBoxX = cardX + 40;
-
-                // Inner content layout
-                Font collocTitleFont = new Font("SansSerif", Font.BOLD, 36);
-                g2d.setFont(collocTitleFont);
-                FontMetrics fmCollocTitle = g2d.getFontMetrics();
-                String collocTitle = "⚡ Collocation: " + item.collocation();
-
-                Font collocMeaningFont = new Font("SansSerif", Font.PLAIN, 32);
-                g2d.setFont(collocMeaningFont);
-                FontMetrics fmCollocMeaning = g2d.getFontMetrics();
-                String meaningText = (item.collocationMeaning() != null && !item.collocationMeaning().isBlank())
-                        ? "→ " + item.collocationMeaning() : null;
-
-                int titleH = fmCollocTitle.getHeight();
-                int meaningH = (meaningText != null) ? fmCollocMeaning.getHeight() : 0;
-                int rowGap = (meaningText != null) ? 14 : 0;
-                int contentH = titleH + rowGap + meaningH;
-
-                int padV = 22; // Symmetric vertical padding
-                int padH = 32; // Symmetric horizontal padding
-                int collocBoxH = contentH + (padV * 2);
-
-                // Pastel Mint Container
-                g2d.setColor(new Color(238, 250, 246));
-                g2d.fill(new RoundRectangle2D.Double(collocBoxX, collocBoxY, collocBoxW, collocBoxH, 28, 28));
-                g2d.setColor(new Color(165, 225, 205));
-                g2d.setStroke(new BasicStroke(2.0f));
-                g2d.draw(new RoundRectangle2D.Double(collocBoxX, collocBoxY, collocBoxW, collocBoxH, 28, 28));
-
-                // Draw Collocation Title (Centered inside box for consistency)
-                g2d.setColor(new Color(15, 130, 95));
-                g2d.setFont(collocTitleFont);
-                int titleX = collocBoxX + (collocBoxW - fmCollocTitle.stringWidth(collocTitle)) / 2;
-                int titleY = collocBoxY + padV + fmCollocTitle.getAscent();
-                g2d.drawString(collocTitle, titleX, titleY);
-
-                // Draw Meaning subtitle (Centered inside box for consistency)
-                if (meaningText != null) {
-                    g2d.setColor(new Color(50, 85, 75));
-                    g2d.setFont(collocMeaningFont);
-                    int meanX = collocBoxX + (collocBoxW - fmCollocMeaning.stringWidth(meaningText)) / 2;
-                    int meanY = titleY + rowGap + fmCollocMeaning.getAscent();
-                    g2d.drawString(meaningText, meanX, meanY);
-                }
-            }
-
-        } finally {
-            g2d.dispose();
-        }
-
-        return image;
+        return createCardImage(topic, item, Map.of(), false, false);
     }
 
-    public BufferedImage createHookCardImage(String topic, Scene scene) {
+    private BufferedImage createCardImage(String topic,
+                                          VocabularyItem item,
+                                          Map<String, Integer> vocabOrder,
+                                          boolean collocationSlide,
+                                          boolean exampleSlide) {
+        return createCardImage(topic, item, vocabOrder, collocationSlide, exampleSlide, null);
+    }
+
+    private BufferedImage createCardImage(String topic,
+                                          VocabularyItem item,
+                                          Map<String, Integer> vocabOrder,
+                                          boolean collocationSlide,
+                                          boolean exampleSlide,
+                                          String spokenText) {
+        if (item == null) {
+            return null;
+        }
+
+        BufferedImage image = new BufferedImage(CANVAS_WIDTH, CANVAS_HEIGHT, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2d = image.createGraphics();
+        try {
+            applyQuality(g2d);
+
+            int index = getWordIndex(item, vocabOrder);
+            int totalWords = Math.max(vocabOrder.size(), 2);
+            String chipText = index + "/" + totalWords;
+            String upperTopic = (topic == null || topic.isBlank()) ? "FAMILY" : topic.toUpperCase(Locale.ROOT);
+
+            int badgeY = 238;
+            drawCenteredPill(g2d,
+                    "★ IELTS 7+ " + upperTopic + " - PART 1",
+                    CANVAS_WIDTH / 2,
+                    badgeY,
+                    new Color(255, 243, 205),
+                    new Color(255, 188, 73),
+                    new Color(145, 88, 0),
+                    27,
+                    20,
+                    9);
+
+            int cardX = 80;
+            int cardY = 320;
+            int cardW = CANVAS_WIDTH - 160;
+            int cardH = 980;
+            int cardArc = 44;
+            drawBaseCard(g2d, cardX, cardY, cardW, cardH, cardArc);
+
+            drawWordChip(g2d, chipText, cardX + 36, cardY + 32);
+
+            if (collocationSlide) {
+                drawHeaderRow(g2d, cardX, cardY, cardW, chipText, item.word(), item.ipa());
+                drawCollocationSlide(g2d, item, cardX, cardY, cardW);
+            } else if (exampleSlide) {
+                drawHeaderRow(g2d, cardX, cardY, cardW, chipText, item.word(), item.ipa());
+                drawExampleSlide(g2d, item, spokenText, cardX, cardY, cardW, cardH);
+            } else {
+                drawWordSlide(g2d, item, cardX, cardY, cardW);
+            }
+
+            return image;
+        } finally {
+            g2d.dispose();
+        }
+    }
+
+    public BufferedImage createHookCardImage(String topic, List<VocabularyItem> vocabularyItems) {
         BufferedImage image = new BufferedImage(CANVAS_WIDTH, CANVAS_HEIGHT, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g2d = image.createGraphics();
 
         try {
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            applyQuality(g2d);
 
-            int cardX = 60;
-            int cardY = 320;
-            int cardW = CANVAS_WIDTH - 120; // 960px
-            int cardH = 1100;
-            int cardArc = 52;
+            int cardX = 90;
+            int cardY = 240;
+            int cardW = CANVAS_WIDTH - 180;
+            int cardH = 990;
+            drawBaseCard(g2d, cardX, cardY, cardW, cardH, 44);
 
-            // Soft shadow
-            g2d.setColor(new Color(60, 80, 120, 25));
-            g2d.fill(new RoundRectangle2D.Double(cardX + 2, cardY + 10, cardW, cardH, cardArc, cardArc));
+            int y = cardY + 70;
+            drawCenteredPill(g2d,
+                    "★ IELTS BAND 7+",
+                    CANVAS_WIDTH / 2,
+                    y,
+                    new Color(255, 243, 205),
+                    new Color(255, 198, 84),
+                    new Color(145, 88, 0),
+                    30,
+                    24,
+                    10);
 
-            // Clean white card
-            g2d.setColor(Color.WHITE);
-            g2d.fill(new RoundRectangle2D.Double(cardX, cardY, cardW, cardH, cardArc, cardArc));
-            g2d.setStroke(new BasicStroke(2.5f));
-            g2d.setColor(new Color(225, 233, 245));
-            g2d.draw(new RoundRectangle2D.Double(cardX, cardY, cardW, cardH, cardArc, cardArc));
+            y += 110;
+            g2d.setColor(new Color(24, 44, 84));
+            g2d.setFont(new Font("SansSerif", Font.BOLD, 74));
+            String title = "TOPIC: " + ((topic == null || topic.isBlank()) ? "FAMILY" : topic.toUpperCase(Locale.ROOT));
+            drawCentered(g2d, title, CANVAS_WIDTH / 2, y);
 
-            // Illustration top half
-            int imgX = cardX + 30;
-            int imgY = cardY + 30;
-            int imgW = cardW - 60;
-            int imgH = 580;
-            BufferedImage hookImg = loadIllustrationForWord("hook");
-            if (hookImg != null) {
-                Shape oldClip = g2d.getClip();
-                g2d.setClip(new RoundRectangle2D.Double(imgX, imgY, imgW, imgH, 40, 40));
-                g2d.drawImage(hookImg, imgX, imgY, imgW, imgH, null);
-                g2d.setClip(oldClip);
-            }
+            y += 70;
+            drawCenteredPill(g2d,
+                    "PHẦN 1 / 3",
+                    CANVAS_WIDTH / 2,
+                    y,
+                    new Color(236, 251, 240),
+                    new Color(107, 160, 124),
+                    new Color(46, 110, 70),
+                    28,
+                    22,
+                    10);
 
-            // Top pill badge
-            String badgeText = "★ IELTS BAND 7+ MASTERCLASS";
-            g2d.setFont(new Font("SansSerif", Font.BOLD, 26));
-            FontMetrics fmBadge = g2d.getFontMetrics();
-            int bW = fmBadge.stringWidth(badgeText) + 40;
-            int bH = 50;
-            int bX = cardX + (cardW - bW) / 2;
-            int bY = imgY + imgH + 40;
-            g2d.setColor(new Color(255, 243, 205));
-            g2d.fill(new RoundRectangle2D.Double(bX, bY, bW, bH, 25, 25));
-            g2d.setColor(new Color(255, 180, 0));
-            g2d.setStroke(new BasicStroke(2.0f));
-            g2d.draw(new RoundRectangle2D.Double(bX, bY, bW, bH, 25, 25));
-            g2d.setColor(new Color(180, 100, 0));
-            g2d.drawString(badgeText, bX + 20, bY + 34);
+            List<VocabularyItem> twoWords = vocabularyItems == null ? List.of() : vocabularyItems;
+            String line1 = buildHookWordLine(twoWords, 0, "Sibling", "anh chị em ruột");
+            String line2 = buildHookWordLine(twoWords, 1, "Relative", "họ hàng thân thích");
 
-            // Title headline
-            g2d.setColor(new Color(26, 39, 68));
-            g2d.setFont(new Font("SansSerif", Font.BOLD, 54));
-            String headline = "TOPIC: " + (topic != null ? topic.toUpperCase() : "FAMILY");
-            FontMetrics fmH = g2d.getFontMetrics();
-            int hX = cardX + (cardW - fmH.stringWidth(headline)) / 2;
-            int hY = bY + bH + 65;
-            g2d.drawString(headline, hX, hY);
+            int boxX = cardX + 76;
+            int boxW = cardW - 152;
+            y += 130;
+            drawHookWordBox(g2d, boxX, y, boxW, line1);
+            y += 160;
+            drawHookWordBox(g2d, boxX, y, boxW, line2);
 
-            // Subtitle note
-            g2d.setColor(new Color(70, 95, 135));
-            g2d.setFont(new Font("SansSerif", Font.PLAIN, 36));
-            String subNote = "Master essential vocabulary with high-scoring collocations";
-            drawCenteredWrappedText(g2d, subNote, cardX + 40, hY + 55, cardW - 80, 44);
+            g2d.setColor(new Color(26, 49, 95));
+            g2d.setFont(new Font("SansSerif", Font.BOLD, 42));
+            String caption = "Muốn đạt IELTS 7.0+? Nâng cấp ngay 2 từ vựng chủ đề Family cực đỉnh!";
+            drawCenteredWrappedText(g2d, caption, 120, 1320, CANVAS_WIDTH - 240, 54);
 
         } finally {
             g2d.dispose();
         }
+
         return image;
     }
 
@@ -335,103 +221,262 @@ public class Graphics2DVisualCardRenderer implements VisualCardRenderer {
         Graphics2D g2d = image.createGraphics();
 
         try {
-            g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            applyQuality(g2d);
 
             int cardX = 60;
             int cardY = 320;
-            int cardW = CANVAS_WIDTH - 120; // 960px
+            int cardW = CANVAS_WIDTH - 120;
             int cardH = 1100;
-            int cardArc = 52;
+            drawBaseCard(g2d, cardX, cardY, cardW, cardH, 52);
 
-            // Soft shadow
-            g2d.setColor(new Color(60, 80, 120, 25));
-            g2d.fill(new RoundRectangle2D.Double(cardX + 2, cardY + 10, cardW, cardH, cardArc, cardArc));
+            drawCenteredPill(g2d,
+                    "★ NEXT LESSON COMING SOON",
+                    CANVAS_WIDTH / 2,
+                    cardY + 120,
+                    new Color(238, 250, 246),
+                    new Color(165, 225, 205),
+                    new Color(15, 130, 95),
+                    26,
+                    20,
+                    9);
 
-            // Clean white card
-            g2d.setColor(Color.WHITE);
-            g2d.fill(new RoundRectangle2D.Double(cardX, cardY, cardW, cardH, cardArc, cardArc));
-            g2d.setStroke(new BasicStroke(2.5f));
-            g2d.setColor(new Color(225, 233, 245));
-            g2d.draw(new RoundRectangle2D.Double(cardX, cardY, cardW, cardH, cardArc, cardArc));
-
-            // Illustration top half
-            int imgX = cardX + 30;
-            int imgY = cardY + 30;
-            int imgW = cardW - 60;
-            int imgH = 580;
-            BufferedImage ctaImg = loadIllustrationForWord("cta");
-            if (ctaImg != null) {
-                Shape oldClip = g2d.getClip();
-                g2d.setClip(new RoundRectangle2D.Double(imgX, imgY, imgW, imgH, 40, 40));
-                g2d.drawImage(ctaImg, imgX, imgY, imgW, imgH, null);
-                g2d.setClip(oldClip);
-            }
-
-            // Top pill badge
-            String badgeText = "★ NEXT LESSON COMING SOON";
-            g2d.setFont(new Font("SansSerif", Font.BOLD, 26));
-            FontMetrics fmBadge = g2d.getFontMetrics();
-            int bW = fmBadge.stringWidth(badgeText) + 40;
-            int bH = 50;
-            int bX = cardX + (cardW - bW) / 2;
-            int bY = imgY + imgH + 40;
-            g2d.setColor(new Color(238, 250, 246));
-            g2d.fill(new RoundRectangle2D.Double(bX, bY, bW, bH, 25, 25));
-            g2d.setColor(new Color(165, 225, 205));
-            g2d.setStroke(new BasicStroke(2.0f));
-            g2d.draw(new RoundRectangle2D.Double(bX, bY, bW, bH, 25, 25));
-            g2d.setColor(new Color(15, 130, 95));
-            g2d.drawString(badgeText, bX + 20, bY + 34);
-
-            // Title headline
             g2d.setColor(new Color(26, 39, 68));
             g2d.setFont(new Font("SansSerif", Font.BOLD, 54));
-            String headline = "PART 2: ADOLESCENCE";
-            FontMetrics fmH = g2d.getFontMetrics();
-            int hX = cardX + (cardW - fmH.stringWidth(headline)) / 2;
-            int hY = bY + bH + 65;
-            g2d.drawString(headline, hX, hY);
+            drawCentered(g2d, "PART 2: ADOLESCENCE", CANVAS_WIDTH / 2, cardY + 250);
 
-            // Subtitle note
             g2d.setColor(new Color(70, 95, 135));
             g2d.setFont(new Font("SansSerif", Font.PLAIN, 36));
             String subNote = "Follow for daily IELTS vocabulary and scoring strategies!";
-            drawCenteredWrappedText(g2d, subNote, cardX + 40, hY + 55, cardW - 80, 44);
+            drawCenteredWrappedText(g2d, subNote, cardX + 40, cardY + 335, cardW - 80, 44);
 
         } finally {
             g2d.dispose();
         }
+
         return image;
     }
 
-    private BufferedImage loadIllustrationForWord(String word) {
-        if (word == null) return null;
-        String wLower = word.toLowerCase().trim();
-        String fileName = switch (wLower) {
-            case "sibling", "siblings" -> "sibling.jpg";
-            case "relative", "relatives" -> "relative.jpg";
-            case "adolescence", "adolescent" -> "hook.jpg";
-            case "nurture", "nurturing" -> "cta.jpg";
-            default -> "sibling.jpg";
-        };
+    private void drawWordSlide(Graphics2D g2d, VocabularyItem item, int cardX, int cardY, int cardW) {
+        int y = cardY + 170;
+        g2d.setColor(new Color(24, 44, 84));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 96));
+        drawCentered(g2d, safe(item.word(), "Vocabulary"), CANVAS_WIDTH / 2, y);
 
-        // Try container path first, then local workspace path
-        for (String base : List.of("/app/assets/images", "assets/images", "/data/assets/images", "06-media/assets/images")) {
-            Path p = Paths.get(base).resolve(fileName);
-            if (Files.exists(p)) {
-                try {
-                    return ImageIO.read(p.toFile());
-                } catch (Exception ignored) {}
+        y += 48;
+        String ipaLine = safe(item.ipa(), "") + (item.partOfSpeech() == null || item.partOfSpeech().isBlank() ? "" : "  •  " + item.partOfSpeech());
+        drawCenteredPill(g2d,
+                ipaLine.isBlank() ? "/.../" : ipaLine,
+                CANVAS_WIDTH / 2,
+                y,
+                new Color(232, 242, 255),
+                new Color(182, 208, 246),
+                new Color(29, 87, 190),
+                34,
+                28,
+                10);
+
+        y += 120;
+        g2d.setColor(new Color(24, 44, 84));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 52));
+        drawCenteredWrappedText(g2d, safe(item.definition(), "(no meaning)"), cardX + 70, y, cardW - 140, 58);
+
+        int dividerY = y + 120;
+        g2d.setColor(new Color(225, 233, 245));
+        g2d.setStroke(new BasicStroke(2.0f));
+        g2d.drawLine(cardX + 50, dividerY, cardX + cardW - 50, dividerY);
+
+        g2d.setColor(new Color(86, 103, 130));
+        g2d.setFont(new Font("SansSerif", Font.PLAIN, 36));
+        drawLeftWrappedText(g2d,
+                "Definition: " + safe(item.definition(), "No definition available."),
+                cardX + 58,
+                dividerY + 58,
+                cardW - 116,
+                46,
+                4);
+    }
+
+    private void drawCollocationSlide(Graphics2D g2d, VocabularyItem item, int cardX, int cardY, int cardW) {
+        int labelY = cardY + 215;
+        g2d.setColor(new Color(52, 132, 88));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 33));
+        drawCentered(g2d, "COLLOCATION", CANVAS_WIDTH / 2, labelY);
+
+        int boxX = cardX + 56;
+        int boxY = cardY + 280;
+        int boxW = cardW - 112;
+        int boxH = 420;
+
+        g2d.setColor(new Color(233, 250, 244));
+        g2d.fill(new RoundRectangle2D.Double(boxX, boxY, boxW, boxH, 34, 34));
+        g2d.setColor(new Color(166, 224, 200));
+        g2d.setStroke(new BasicStroke(2.0f));
+        g2d.draw(new RoundRectangle2D.Double(boxX, boxY, boxW, boxH, 34, 34));
+
+        g2d.setColor(new Color(23, 111, 73));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 68));
+        drawCenteredWrappedText(g2d, safe(item.collocation(), "(no collocation)"), boxX + 50, boxY + 160, boxW - 100, 74);
+
+        g2d.setColor(new Color(70, 90, 94));
+        g2d.setFont(new Font("SansSerif", Font.PLAIN, 38));
+        drawCenteredWrappedText(g2d,
+                "→ " + safe(item.collocationMeaning(), "No collocation meaning."),
+                boxX + 46,
+                boxY + 310,
+                boxW - 92,
+                50);
+    }
+
+    private void drawExampleSlide(Graphics2D g2d,
+                                  VocabularyItem item,
+                                  String spokenText,
+                                  int cardX,
+                                  int cardY,
+                                  int cardW,
+                                  int cardH) {
+        int labelY = cardY + 215;
+        g2d.setColor(new Color(148, 102, 26));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 33));
+        drawCentered(g2d, "EXAMPLE", CANVAS_WIDTH / 2, labelY);
+
+        String example = safe(item.exampleSentence(), spokenText);
+        if (example != null && example.toLowerCase(Locale.ROOT).startsWith("example sentence")) {
+            int idx = example.indexOf(':');
+            if (idx >= 0 && idx < example.length() - 1) {
+                example = example.substring(idx + 1).trim();
             }
         }
-        return null;
+
+        g2d.setColor(new Color(24, 44, 84));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 62));
+        drawCenteredWrappedText(g2d, safe(example, "No example available."), cardX + 70, cardY + (cardH / 2), cardW - 140, 80);
+    }
+
+    private void drawHeaderRow(Graphics2D g2d, int cardX, int cardY, int cardW, String chipText, String word, String ipa) {
+        drawWordChip(g2d, chipText, cardX + 36, cardY + 32);
+
+        g2d.setColor(new Color(29, 82, 176));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 34));
+        String head = safe(word, "Word") + " " + safe(ipa, "");
+        g2d.drawString(head.trim(), cardX + 220, cardY + 84);
+
+        int dividerY = cardY + 120;
+        g2d.setColor(new Color(225, 233, 245));
+        g2d.setStroke(new BasicStroke(2.0f));
+        g2d.drawLine(cardX + 40, dividerY, cardX + cardW - 40, dividerY);
+    }
+
+    private void drawWordChip(Graphics2D g2d, String text, int x, int y) {
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 32));
+        FontMetrics fm = g2d.getFontMetrics();
+        int w = fm.stringWidth(text) + 34;
+        int h = fm.getHeight() + 14;
+
+        g2d.setColor(new Color(227, 240, 255));
+        g2d.fill(new RoundRectangle2D.Double(x, y, w, h, 24, 24));
+        g2d.setColor(new Color(77, 120, 202));
+        g2d.setStroke(new BasicStroke(1.5f));
+        g2d.draw(new RoundRectangle2D.Double(x, y, w, h, 24, 24));
+
+        g2d.setColor(new Color(31, 77, 160));
+        g2d.drawString(text, x + 17, y + ((h - fm.getHeight()) / 2) + fm.getAscent());
+    }
+
+    private void drawHookWordBox(Graphics2D g2d, int x, int y, int w, String text) {
+        int h = 120;
+        g2d.setColor(new Color(236, 251, 244));
+        g2d.fill(new RoundRectangle2D.Double(x, y, w, h, 28, 28));
+        g2d.setColor(new Color(184, 220, 204));
+        g2d.setStroke(new BasicStroke(2f));
+        g2d.draw(new RoundRectangle2D.Double(x, y, w, h, 28, 28));
+
+        int slash = text.indexOf('/');
+        if (slash < 0) {
+            g2d.setColor(new Color(16, 68, 145));
+            g2d.setFont(new Font("SansSerif", Font.BOLD, 42));
+            drawCentered(g2d, text, CANVAS_WIDTH / 2, y + 74);
+            return;
+        }
+
+        String left = text.substring(0, slash).trim();
+        String right = text.substring(slash + 1).trim();
+
+        g2d.setColor(new Color(16, 68, 145));
+        g2d.setFont(new Font("SansSerif", Font.BOLD, 42));
+        g2d.drawString(left + " /", x + 34, y + 56);
+
+        g2d.setColor(new Color(75, 86, 95));
+        g2d.setFont(new Font("SansSerif", Font.PLAIN, 34));
+        g2d.drawString(right, x + 34, y + 98);
+    }
+
+    private void drawBaseCard(Graphics2D g2d, int x, int y, int w, int h, int arc) {
+        g2d.setColor(new Color(60, 80, 120, 22));
+        g2d.fill(new RoundRectangle2D.Double(x + 2, y + 8, w, h, arc, arc));
+
+        g2d.setColor(Color.WHITE);
+        g2d.fill(new RoundRectangle2D.Double(x, y, w, h, arc, arc));
+
+        g2d.setColor(new Color(225, 233, 245));
+        g2d.setStroke(new BasicStroke(2.2f));
+        g2d.draw(new RoundRectangle2D.Double(x, y, w, h, arc, arc));
+    }
+
+    private int getWordIndex(VocabularyItem item, Map<String, Integer> vocabOrder) {
+        if (item == null || item.word() == null || item.word().isBlank()) {
+            return 1;
+        }
+        Integer index = vocabOrder.get(item.word().toLowerCase(Locale.ROOT));
+        return index == null ? 1 : index;
+    }
+
+    private String buildHookWordLine(List<VocabularyItem> items, int idx, String fallbackWord, String fallbackMeaning) {
+        if (items == null || items.size() <= idx || items.get(idx) == null) {
+            return (idx + 1) + " " + fallbackWord + " / " + fallbackMeaning;
+        }
+        VocabularyItem item = items.get(idx);
+        String meaning = safe(item.definition(), fallbackMeaning);
+        return (idx + 1) + " " + safe(item.word(), fallbackWord) + " / " + meaning;
+    }
+
+    private String safe(String value, String fallback) {
+        return (value == null || value.isBlank()) ? fallback : value.trim();
+    }
+
+    private void drawCenteredPill(Graphics2D g2d,
+                                  String text,
+                                  int centerX,
+                                  int topY,
+                                  Color bgColor,
+                                  Color borderColor,
+                                  Color textColor,
+                                  int fontSize,
+                                  int padX,
+                                  int padY) {
+        g2d.setFont(new Font("SansSerif", Font.BOLD, fontSize));
+        FontMetrics fm = g2d.getFontMetrics();
+        int w = fm.stringWidth(text) + (padX * 2);
+        int h = fm.getHeight() + (padY * 2);
+        int x = centerX - (w / 2);
+
+        g2d.setColor(bgColor);
+        g2d.fill(new RoundRectangle2D.Double(x, topY, w, h, 26, 26));
+        g2d.setColor(borderColor);
+        g2d.setStroke(new BasicStroke(2f));
+        g2d.draw(new RoundRectangle2D.Double(x, topY, w, h, 26, 26));
+
+        g2d.setColor(textColor);
+        g2d.drawString(text, x + padX, topY + padY + fm.getAscent());
+    }
+
+    private void drawCentered(Graphics2D g2d, String text, int centerX, int baselineY) {
+        FontMetrics fm = g2d.getFontMetrics();
+        g2d.drawString(text, centerX - (fm.stringWidth(text) / 2), baselineY);
     }
 
     private int drawCenteredWrappedText(Graphics2D g, String text, int x, int y, int maxWidth, int lineHeight) {
         FontMetrics fm = g.getFontMetrics();
-        String[] words = text.split(" ");
+        String[] words = text.split("\\s+");
         StringBuilder currentLine = new StringBuilder();
         int currentY = y;
         int linesCount = 0;
@@ -454,5 +499,40 @@ public class Graphics2DVisualCardRenderer implements VisualCardRenderer {
             linesCount++;
         }
         return linesCount;
+    }
+
+    private void drawLeftWrappedText(Graphics2D g, String text, int x, int y, int maxWidth, int lineHeight, int maxLines) {
+        FontMetrics fm = g.getFontMetrics();
+        String[] words = text.split("\\s+");
+        StringBuilder line = new StringBuilder();
+        int currentY = y;
+        int lines = 0;
+
+        for (String word : words) {
+            String candidate = line.length() == 0 ? word : line + " " + word;
+            if (fm.stringWidth(candidate) <= maxWidth) {
+                line.setLength(0);
+                line.append(candidate);
+            } else {
+                g.drawString(line.toString(), x, currentY);
+                currentY += lineHeight;
+                lines++;
+                if (lines >= maxLines) {
+                    return;
+                }
+                line.setLength(0);
+                line.append(word);
+            }
+        }
+
+        if (!line.isEmpty() && lines < maxLines) {
+            g.drawString(line.toString(), x, currentY);
+        }
+    }
+
+    private void applyQuality(Graphics2D g2d) {
+        g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
     }
 }

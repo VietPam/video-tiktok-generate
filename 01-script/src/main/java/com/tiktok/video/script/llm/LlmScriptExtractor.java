@@ -114,13 +114,33 @@ public class LlmScriptExtractor implements ScriptExtractor {
 
                 VocabularyItem enrichedItem = ipaEnricher.enrich(item);
 
-                String spoken = String.format("Word %d is %s. Definition: %s. For example: %s. A key collocation is %s.",
-                    seq, enrichedItem.word(), enrichedItem.definition(), enrichedItem.exampleSentence(), enrichedItem.collocation());
-                String subtitle = String.format("%s: %s | Collocation: %s",
-                    enrichedItem.word(), enrichedItem.definition(), enrichedItem.collocation());
+                String wordStem = enrichedItem.word().toLowerCase().replaceAll("[^a-z0-9]", "");
+                String definition = safeText(enrichedItem.definition(), "Definition is being introduced.");
+                String collocation = safeText(enrichedItem.collocation(), "No collocation provided.");
+                String collocationMeaning = safeText(enrichedItem.collocationMeaning(), "Collocation meaning unavailable.");
+                String example = safeText(enrichedItem.exampleSentence(), "No example provided.");
 
-                String sceneId = String.format("scene_%02d_%s", seq, enrichedItem.word().toLowerCase().replaceAll("[^a-z0-9]", ""));
-                scenes.add(Scene.vocabulary(sceneId, seq++, spoken, subtitle, enrichedItem));
+                String wordSpoken = String.format("Word %d is %s. Definition: %s.",
+                    seq, enrichedItem.word(), definition);
+                String wordSubtitle = String.format("%s / %s",
+                    enrichedItem.word(), definition);
+                scenes.add(Scene.vocabulary(
+                    String.format("scene_%02d_%s_word", seq, wordStem),
+                    seq++, wordSpoken, wordSubtitle, enrichedItem));
+
+                String collocationSpoken = String.format("Collocation for %s is %s. It means %s.",
+                    enrichedItem.word(), collocation, collocationMeaning);
+                String collocationSubtitle = String.format("%s → %s", collocation, collocationMeaning);
+                scenes.add(Scene.vocabularyCollocation(
+                    String.format("scene_%02d_%s_collocation", seq, wordStem),
+                    seq++, collocationSpoken, collocationSubtitle, enrichedItem));
+
+                String exampleSpoken = String.format("Example sentence with %s: %s",
+                    enrichedItem.word(), example);
+                String exampleSubtitle = String.format("Ví dụ: %s", example);
+                scenes.add(Scene.vocabularyExample(
+                    String.format("scene_%02d_%s_example", seq, wordStem),
+                    seq++, exampleSpoken, exampleSubtitle, enrichedItem));
             }
 
             // Scene CTA
@@ -132,5 +152,9 @@ public class LlmScriptExtractor implements ScriptExtractor {
         } catch (Exception e) {
             throw new ScriptExtractionException("Failed to parse LLM JSON into TikTokScript: " + e.getMessage(), e, rawJson);
         }
+    }
+
+    private String safeText(String value, String fallback) {
+        return (value == null || value.isBlank()) ? fallback : value.trim();
     }
 }

@@ -242,10 +242,33 @@ public class RegexTranscriptExtractor implements ScriptExtractor {
                     .exampleSentence(example)
                     .build();
 
-            String spoken = String.format("Word %d is %s: %s. For example, %s. Collocation: %s.",
-                    seq, word, definition, example, collocation);
-            String sub = String.format("%s: %s | Collocation: %s", word, definition, collocation);
-            scenes.add(Scene.vocabulary(String.format("scene_%02d_%s", seq, word.toLowerCase()), seq++, spoken, sub, item));
+            String safeDefinition = safeText(definition, "Definition is being introduced.");
+            String safeExample = safeText(example, "No example provided.");
+            String safeCollocation = safeText(collocation, "No collocation provided.");
+            String safeCollocationMeaning = safeText(collocationMeaning, "Collocation meaning unavailable.");
+            String wordStem = word.toLowerCase().replaceAll("[^a-z0-9]", "");
+
+            String wordSpoken = String.format("Word %d is %s. Definition: %s.", seq, word, safeDefinition);
+            String wordSub = String.format("%s / %s", word, safeDefinition);
+            scenes.add(Scene.vocabulary(String.format("scene_%02d_%s_word", seq, wordStem), seq++, wordSpoken, wordSub, item));
+
+            String collocationSpoken = String.format("Collocation for %s is %s. It means %s.", word, safeCollocation, safeCollocationMeaning);
+            String collocationSub = String.format("%s → %s", safeCollocation, safeCollocationMeaning);
+            scenes.add(Scene.vocabularyCollocation(
+                    String.format("scene_%02d_%s_collocation", seq, wordStem),
+                    seq++,
+                    collocationSpoken,
+                    collocationSub,
+                    item));
+
+            String exampleSpoken = String.format("Example sentence with %s: %s", word, safeExample);
+            String exampleSub = String.format("Ví dụ: %s", safeExample);
+            scenes.add(Scene.vocabularyExample(
+                    String.format("scene_%02d_%s_example", seq, wordStem),
+                    seq++,
+                    exampleSpoken,
+                    exampleSub,
+                    item));
         }
 
         // CTA Scene
@@ -260,6 +283,10 @@ public class RegexTranscriptExtractor implements ScriptExtractor {
     private static String cleanCandidateWord(String raw) {
         if (raw == null) return "";
         return raw.replaceAll("[.:;!?,\"'`]", "").trim();
+    }
+
+    private static String safeText(String value, String fallback) {
+        return (value == null || value.isBlank()) ? fallback : value.trim();
     }
 
     private static boolean isValidCandidateWord(String word) {
